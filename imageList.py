@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+"""
+This is the first scipt needed to create a time lapse video using FFmpeg.
+In particular, this scrit will gather a list of images, select images based on user input, download the images (if requested), and finally organize the list in a structure that FFmpeg can read.
+"""
 
 from os import path, walk
 from datetime import datetime, time
@@ -9,11 +13,9 @@ import argparse
 
 
 
-# If reported exposure is above this value, do not include the image (too dark)
+# If reported exposure is above this value, do not include the image (too dark), only relevant when accessing the archive locally
 EXPOSURE_THRESHOLD = 1000
 PHENOCAM_URL = "https://phenocam.nau.edu/"
-DEFAULT_ARCHIVE = "/data/archive/" # Location of phenocam imagery on NAU servers (not local, change that using `--archive`)
-DOWNLOAD_LOCATION = "./archive"
 
 
 # Command line variables
@@ -31,18 +33,21 @@ parser.add_argument('endDate', action='store', default="9999-12-31",
 # Terminal verbosity
 parser.add_argument('--verbose', '-v', action='count', default=0,
 	help="Post more messages useful for debugging")
-# Path to PhenoCam imagery (or where it should be downloaded to)
-parser.add_argument('--archive', action='store', default=DEFAULT_ARCHIVE,
+# Path to PhenoCam imagery
+parser.add_argument('--archive', action='store', default="/data/archive/",
     help="Filesystem path to PhenoCam image archive")
+# Path to use when downloading images (if applicable)
+parser.add_argument('--download-location', action='store', default="./archive/",
+    help="Filesystem path to use when downloading images")
 # Path to PhenoCam imagery (or where it should be downloaded to)
 parser.add_argument('--download', action='store_true',
-    help="Download images from the PhenoCam server")
+    help="Download images from the website. Please be nice to our servers!")
 # Cant do both all images and only midday
 imageSelection = parser.add_mutually_exclusive_group(required=True)
 imageSelection.add_argument('--midday', action='store_true',
     help="Include only midday images within specified time")
 imageSelection.add_argument('--all-daytime', action='store_true',
-    help="Include all daytime images within specified time")
+    help="Include all daytime images within specified time. Not reccomended!")
 
 args = parser.parse_args()
 
@@ -50,12 +55,16 @@ args = parser.parse_args()
 startDate = datetime.strptime(args.startDate,'%Y-%m-%d')
 # End time for including images
 endDate = datetime.strptime(args.endDate,'%Y-%m-%d')
+# Check that dates are valid
+if startDate > endDate:
+    raise Exception("Your start date must be before your end date!")
+
 # Absolute filesystem path to the site, i.e. /data/archive/harvard/
 sitePath = path.join(args.archive, args.sitename)
     
-
 # list which valid images will be added
 imageList = []
+
 
 
 
@@ -69,6 +78,7 @@ if args.midday:
         # GET the list of midday images, convert it to a dictionary
         middayimgs = json.loads(request.urlopen(parse.urljoin(PHENOCAM_URL,
             f"/api/middayimages/{args.sitename}")).read())
+        # Add each midday image to the list (will be sorted later)
         for day in middayimgs:
             imageList.append(parse.urljoin(PHENOCAM_URL, day["imgpath"]))
     else:
@@ -87,60 +97,78 @@ if args.midday:
 
 # If using all daytime images
 elif args.all_daytime:
-    # TODO currently doesn't work without the API
-    for root, dirs, files in walk(sitePath):
-        for file in files:
-            file = path.join(root, '/'.join(dirs), file)
-            # Make sure the file is a jpeg and not an IR image
-            if file.endswith(".jpg") and not "ROI" in file and not "IR" in file:
-                # By default, include images which are missing metadata (may cause some images to appear like static)
-                exposure = 0
-                try:
-                    # Open the corresponding metadata file
-                    with open(file.replace(".jpg", ".meta"), 'r') as f:
-                        for line in f.readlines():
-                            if line.startswith("exposure="):
-                                # Record the exposure value
-                                exposure = int(line.split("=")[-1])
-                                # Dont read the rest of the metadata file
-                                break
-                except FileNotFoundError:
-                    # Ocassionally, there is no metadata file
-                    print("No metadata found for {imageDate}!")
+    # If there is no local archive
+    # TODO filter out black images when using API
+    if not path.exists(sitePath):
+        # GET the list of all images for site
+        if args.verbose > 0:
+            print("DOWNLOADING METADATA\nThis may take a long time for old sites!")
+        allimgs = json.loads(request.urlopen(parse.urljoin(PHENOCAM_URL,
+            f"/api/siteimagelist/{args.sitename}/")).read())
+        # Add every image to the list
+        imageList = allimgs["imagelist"]
+    else:
+        for root, dirs, files in walk(sitePath):
+            for file in files:
+                file = path.join(root, '/'.join(dirs), file)
+                # Make sure the file is a jpeg and not an IR image
+                if file.endswith(".jpg") and not "ROI" in file and not "IR" in file:
+                    # By default, include images which are missing metadata (may cause some images to appear like static)
+                    exposure = 0
+                    try:
+                        # Open the corresponding metadata file
+                        with open(file.replace(".jpg", ".meta"), 'r') as f:
+                            for line in f.readlines():
+                                if line.startswith("exposure="):
+                                    # Record the exposure value
+                                    exposure = int(line.split("=")[-1])
+                                    # Dont read the rest of the metadata file
+                                    break
+                    # If the metadata file is not found
+                    except FileNotFoundError:
+                        # Ocassionally, there is no metadata file
+                        print("No metadata found for {imageDate}!")
+    
+                    # if the image is bright enough
+                    if exposure < EXPOSURE_THRESHOLD:
+                        # Add the image to the list
+                        imageList.append(file)
+                        if args.verbose > 0:
+                            print(f"ADDED: {file}; EXPOSURE: {exposure}")
+                    elif args.verbose > 1:
+                        print(f"TOO DARK: {file}; EXPOSURE: {exposure}")
 
-                # if the image is bright enough
-                if exposure < EXPOSURE_THRESHOLD:
-                    # Add the image to the list
-                    imageList.append(file)
-                    if args.verbose > 0:
-                        print(f"ADDED: {file}; EXPOSURE: {exposure}")
-                elif args.verbose > 1:
-                    print(f"TOO DARK: {file}; EXPOSURE: {exposure}")
 
 # Filter images based on date
-imageListFinal = []
-for i, image in enumerate(imageList):
+selectedImages = []
+for image in imageList:
     # ONLY works on standard names, i.e.:
     # segaarboretummeadow_2020_07_11_213405.jpg
     imageDate = datetime.strptime(image[-21:-11],'%Y_%m_%d')
-    # If the image is within range
+    # If the image is not within range
     if startDate <= imageDate <= endDate:
-        imageListFinal.append(image)
+        # Remove this image from the list
+        selectedImages.append(image)
         if args.verbose > 2:
-            print(f"IMAGE SELECTED: {image}")
+            print(f"IMAGE ADDED: {image}")
 
-    # Download images
-    # TODO FFmpeg supports network sources, but concat doesn't seem to. Is there another workaround to avoid downloading the images here?
-for i, image in enumerate(imageListFinal):
+
+# Download images
+# TODO FFmpeg supports network sources, but concat doesn't seem to. Is there another workaround to avoid downloading the images here?
+for i, image in enumerate(selectedImages):
     if args.download:
-        saveFP =  path.join(DOWNLOAD_LOCATION, path.basename(image))
-        imageListFinal[i] = saveFP
+        # Get the path where image will be downloaded to
+        saveFP =  path.join(args.download_location, path.basename(image))
+        # Rename the image (so FFmpeg knows where to look)
+        selectedImages[i] = saveFP
         if not path.exists(saveFP):
             if args.verbose > 1:
                 print(f"DOWNLOADING: {image}")
             if args.verbose > 2:
                 print(f"SAVED TO: {saveFP}")
+            # Download the image from the server
             request.urlretrieve(image, saveFP)
+        # Don't download existing images
         elif args.verbose > 0:
             print(f"NOT DOWNLOADED: {saveFP} (already exists)")
 
@@ -152,13 +180,12 @@ for i, image in enumerate(imageListFinal):
 if args.verbose > 1:
     print("Writing list to file...")
 # Images must be sorted now, FFmpeg renders the images in the same order as here
-imageList.sort()
+selectedImages.sort()
 with open('images.txt', 'w') as f:
-    for image in imageListFinal:
+    for image in selectedImages:
         # Expected format by FFmpeg concat:
         # file 'filepath'
         f.write(f"file '{image}'\n")
 
 if args.verbose > 0:
     print("\nDONE! You can now render the video with `videoFile.sh` or turn it into a gif with `gif.sh`.")
-

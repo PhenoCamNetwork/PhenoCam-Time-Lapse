@@ -1,5 +1,6 @@
 images.txt
 *.mp4
 *.gif
+!example.gif
 *.mkv
 archive/
