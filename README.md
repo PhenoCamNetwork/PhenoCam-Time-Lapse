@@ -2,7 +2,9 @@
 
 A small tool to create a video time-lapse using PhenoCam images.
 
-![Timelapse of Harvard](example.gif)
+![Time lapse of Harvard](example.gif)
+
+*Time lapse of Harvard, 2025-01-01 to 2025-02-25*
 
 ***
 
@@ -16,11 +18,11 @@ Requirements for rendering the video:
    - Must be compiled libx264 support if rendering video
  - API access or a local copy of the archive
  
-To playback the rendered video a device must have the ability to play h264 video.
+To play back the rendered video a device must have the ability to play h264 video.
 
 ## Generating the image List
 
-Before rending the video, you must first generate a list of images. This can be done with the help of `imageList.py`. You must choose between including only midday images or including every daytime image. The former will result in a faster video and smaller file size, best for viewing change over the coarse of a year or so. The latter is best for viewing day-to-day changes on a smaller timescale.
+Before rending the video, you must first generate a list of images. This can be done with the help of `imageList.py`. You must choose between including only midday images or including every daytime image. The former will result in a faster video and smaller file size, best for viewing change over the course of a year or so. The latter is best for viewing day-to-day changes on a smaller timescale.
 
 To use the `imageList.py` script, you must provide: the site name, start date, end date, and specify weather you want only midday images or all daylight images. Running this script with the `--help` switch will list all available options.
 
@@ -28,7 +30,7 @@ This python script will generate a text file in a format that FFmpeg can read to
 
 ### Using local archive backup
 
-This section is only applicable if you have a backup of the PhenoCam archive, or direct access to the archive (such as NAU employees). **If you do not fit into either of these categories, continue to the next section.** By default, this script will assume the archive is located at `/data/archive/`. If the archive is elsewhere on your filesystem, specify using the flag `--archive`.
+This section is only applicable if you have a backup of the PhenoCam archive, or direct access to the archive (such as NAU employees). **If you do not fit into either of these categories, continue to the next section.** By default, this script will assume the archive is located at `/data/archive/`. If the archive is elsewhere on your file system, specify using the flag `--archive`.
 
 For midday images:
 

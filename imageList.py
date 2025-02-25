@@ -7,7 +7,6 @@ In particular, this scrit will gather a list of images, select images based on u
 from os import path, walk
 from datetime import datetime, time
 from urllib import request, parse
-from tempfile import TemporaryDirectory
 import json
 import argparse
 
